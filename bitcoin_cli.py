@@ -447,14 +447,11 @@ class Interactive:
 				trans_info = self.api_cmd("gettransaction", [params[0]])
 				orig_trans_amount = trans_info['amount']
 
-				s = orig_trans_amount * 10e8
-
-				self.p("CCCCCC %f" % orig_trans_amount)
 				xfer_amount = float(params[2])
 				fee = 0.0005
 				# prevent floating point rounding error
 				change = float(orig_trans_amount) - xfer_amount - fee
-				change = int(change * 10e8) * 10e-8
+				change = round(change * 1e8) * 1e-8
 				if change < 0:
 					self.p("Invalid amount")
 					return
