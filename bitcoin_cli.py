@@ -389,12 +389,8 @@ class Interactive:
 				return
 			if len(params) == 0:
 				key = None
-			elif params[0] == '_':
-				key = params[0] = ''
-			elif params[0] == 'None':
-				key = None
-				params = []
 			else:
+				# if first param is a digit, and command takes an account, then the digit is the account number
 				md = re.match('^(\d+)$', params[0])
 				if md:
 					cmd_params = valid_cmds[cmd]
@@ -402,7 +398,11 @@ class Interactive:
 						params[0] = "ACC%s" % md.group(1)
 
 				for i in range(len(params)):
-					if params[i][0] == '#':
+					if params[i] == '_':
+						params[i] = ''
+					elif params[i] == 'None':
+						params[i] = ''
+					elif params[i][0] == '#':
 						try:
 							params[i] = self.buffer_val(params[i][1:])
 						except Exception:
