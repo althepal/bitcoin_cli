@@ -1,33 +1,33 @@
 #!/usr/bin/env python
 import sys
-import argparse
 from subprocess import call, check_output
 import os
 import json
 import pprint
 import re
-import curses
 import time
 import shlex
 import readline
 
-
-"""
-This script can be used to interface with a runining version Bitcoin-QT.
-
-Setup:
-	1. Run Bitcoin-QT in server mode (one a MAC: open /Applications/Bitcoin-Qt.app/ --args -server)
-	2. in bitcoin.conf, add the following lines:
-	  server = 1
-	  rpcuser = <user> # this does not have to be an actual user on the system, only used to access bitcoin server
-	  rpcpassword = <pass>
-	3. Set RPC_USER and RPC_PASS in this script.
-	4. That's it, invoke the script.
-"""
-
+rc_file_name = ".bitcoin_clirc"
 RPC_USER = 'bitcoinrpc'
-RPC_PASS = '3SPqMpxxmC7jqnVHtJav1dAJjTQToi7tPwx2zhReKFNz'
-HISTORY_FILE = 'rpc.history'
+RPC_PASS = ''
+HISTORY_FILE = '.bitcoin_cli_history'
+rc_buffers = {}
+try:
+	rc_path = os.path.join(os.environ["HOME"], rc_file_name)
+	with open(rc_path, 'r') as rc_file:
+#		line = rc_file.readline()
+		for line in rc_file:
+			parts = line.split()
+			if parts[0] == 'RPC_PASS':
+				RPC_PASS = parts[1]
+			elif parts[0] == 'RPC_USER':
+				RPC_USER = parts[1]
+			elif parts[0] == 'buffer':
+				rc_buffers[parts[1]] = parts[2]
+except:
+	pass
 
 if not RPC_USER or not RPC_PASS:
 	print "You must set RPC_USER and RPC_PASS to run script."
@@ -57,13 +57,14 @@ command_abbrevs = {
 	'lag': 'listaddressgroupings',
 	'wpp': 'walletpassphrase',
 	'q': 'quit',
+	'h': 'history',
 }
 reverse_abbrevs = {}
 for abbrev, cmd in command_abbrevs.iteritems():
 	reverse_abbrevs[cmd] = abbrev
 
 help_out = """
-#addmultisigaddress <nrequired> <'["key","key"]'> [account]
+addmultisigaddress <nrequired> <'["key","key"]'> [account]
 backupwallet <destination>
 createrawtransaction [{"txid":txid,"vout":n},...] {address:amount,...}
 decoderawtransaction <hex string>
@@ -152,23 +153,12 @@ class CmdError(Exception):
 class Interactive:
 	cmd_results = {}
 	def __init__(self, screen=None, pre_load=True):
-		self.history = []
-#		self.clipboard = ''
-		self.buffers = {}
-		self.buffers = {
-				'txid': '1e6b4ce86d11c9ec6a6430ada1444a15c0cc04e82b382a7a425711f0644cb85a',
-				'blockchain_addr': '18gfUghcnKU2NpCuvyVcXKd7LLgAbFtJHJ',
-				'addr_change': '15vs9hq4riw5C6hFAUsrgLNfE4X6bLF4Lx',
-				}
-		self.buffers['xxx'] = {'aa': 1, 'aax': 2}
-		self.buffers['xxx2'] = [1,2,3]
-#		self.clipboard = "01000000015ab84c64f01157427a2a382be804ccc0154a44a1ad30646aecc9116de84c6b1e0000000000ffffffff0100f2052a010000001976a9140ab3419260156f9797ea57c523835ed6f9d6edac88ac00000000"
-#		self.last_result = ''
+		global rc_buffers
+		self.buffers = rc_buffers
 		self.print_api_cmd = False
 		self.screen = screen
 		if pre_load:
 			self.printStuff()
-#		self.load_history()
 	def loadStuff(self):
 		self.run_cmd("getbalance")
 		self.run_cmd("listaccounts")
@@ -177,39 +167,34 @@ class Interactive:
 		self.getaddresses()
 
 	def buffer_complete(self, begin_buffer):
-#		print "BB " + begin_buffer
 		parts = begin_buffer.split('.')
 		if len(parts) > 1:
 			part_num = 1
-			if 1:
-				name = parts[0]
-				val = self.buffers[name]
-				stub = name + '.'
-				while part_num < len(parts) - 1:
-					idx = parts[part_num]
-					stub += idx + '.'
-					part_num += 1
-					if type(val) is list:
-						idx = int(idx)
-					val = val[idx]
-				remain = parts[part_num]
+			name = parts[0]
+			val = self.buffers[name]
+			stub = name + '.'
+			while part_num < len(parts) - 1:
+				idx = parts[part_num]
+				stub += idx + '.'
+				part_num += 1
 				if type(val) is list:
-					sv = [str(i) for i in range(len(val))]
-					completes = [stub + i for i in sv if i.startswith(remain)]
-				else:
-					completes = [stub + i for i in val.viewkeys() if i.startswith(remain)]
-				if len(completes) == 1:
-					try:
-						if type(val) is list:
-							remain = int(remain)
-						v2 = val[remain]
-						if isinstance(v2, (list, dict)):
-							completes[0] += '.'
-					except Exception:
-						pass
-#			except Exception:
-#				print "ERROR"
-#				return None
+					idx = int(idx)
+				val = val[idx]
+			remain = parts[part_num]
+			if type(val) is list:
+				sv = [str(i) for i in range(len(val))]
+				completes = [stub + i for i in sv if i.startswith(remain)]
+			else:
+				completes = [stub + i for i in val.viewkeys() if i.startswith(remain)]
+			if len(completes) == 1:
+				try:
+					if type(val) is list:
+						remain = int(remain)
+					v2 = val[remain]
+					if isinstance(v2, (list, dict)):
+						completes[0] += '.'
+				except Exception:
+					pass
 		else:
 			completes = [i for i in self.buffers if i.startswith(begin_buffer)]
 			if len(completes) == 1:
@@ -217,20 +202,6 @@ class Interactive:
 					completes[0] += '.'
 
 		return ['#' + i for i in completes]
-	def load_history(self):
-		try:
-			with open(HISTORY_FILE, 'r') as f:
-				for line in f:
-					self.history.append(line.strip())
-		except IOError:
-			pass
-#	def add_history(self, cmd_line):
-#		if len(self.history) and cmd_line == self.history[-1]:
-#			return
-#		self.history.append(cmd_line)
-#		with open(HISTORY_FILE, 'a') as f:
-#			f.write(cmd_line + "\n")
-
 	def p(self, o='', formatted=False, split_lists=True):
 		if o == '':
 			output = "\n"
@@ -252,40 +223,20 @@ class Interactive:
 		else:
 			print output
 	def api_cmd(self, cmd, params=[]):
-#		ps = []
-#		for p in params:
-##			print "PARAM: {}".format(p)
-#			try:
-#				p2 = int(p)
-#				ps.append(p2)
-#			except Exception:
-#				ps.append(p)
 		json_params = json.dumps(params)
-#		for p in params:
-#			if p == None:
-#				continue
-#			else:
-#				ps.append('"%s"' % p)
-#		param = ', '.join(ps)
-#		db = "--data-binary '{\"method\":\"%s\",\"params\":[%s]}'" % (cmd, param)
 		db = "--data-binary '{\"method\":\"%s\",\"params\":%s}'" % (cmd, json_params)
 		curl_cmd="/usr/bin/curl -s --user %s:%s %s http://127.0.0.1:8332/" % (RPC_USER, RPC_PASS, db)
 		cmd_out = json.loads(check_output(curl_cmd, shell=True))
-#		self.p(cmd_out)
 		if self.print_api_cmd:
 			self.p(db, True)
 		if cmd_out['error'] == None:
 			return cmd_out['result']
 		else:
-#			print [cmd, param, curl_cmd, cmd_out]
 			raise CmdError(cmd, json_params, curl_cmd, cmd_out['error'])
 	def getaddresses(self):
 		for account_name in self.cmd_results['listaccounts'][None]:
 			if account_name == '': account_name = '_'
-#			print "account_name %s", (account_name)
 			self.run_cmd("getaddressesbyaccount '%s'" % account_name)
-
-		
 	def printStuff(self):
 		self.loadStuff()
 		self.p(self.getStuff(), True)
@@ -353,8 +304,6 @@ class Interactive:
 			else:
 				name = args[0]
 				val = args[1]
-#				if val == 'CB':
-#					val = self.clipboard
 				if val[0] == '#':
 					val2 = val[1:]
 					try:
@@ -375,10 +324,6 @@ class Interactive:
 			self.p(self.buffers)
 		elif cmd == 'info':
 			self.printStuff()
-#		elif cmd == 'LAST':
-#			self.p(self.last_result)
-#		elif cmd == 'CB':
-#			self.p(self.clipboard)
 		elif cmd[0] == '#':
 			name = cmd[1:]
 			if len(params) == 0:
@@ -396,7 +341,7 @@ class Interactive:
 				except Exception:
 					self.p("Invalid value")
 
-		elif cmd == 'h':
+		elif cmd == 'history':
 			if len(args) > 0:
 				try:
 					show_num = int(args[0])
@@ -406,6 +351,9 @@ class Interactive:
 			else:
 				show_num = 20
 			h_len = readline.get_current_history_length()
+			if h_len < show_num:
+				show_num = h_len
+			print "XX {} {}".format(show_num, h_len)
 			for n in range(h_len - show_num, h_len):
 				self.p("{}: {}".format(n + 1, readline.get_history_item(n + 1)))
 		elif cmd == 'sh':
@@ -421,39 +369,21 @@ class Interactive:
 				c = readline.get_history_item(n)
 				if re.search(search_arg, c):
 					self.p("{}: {}".format(n, c))
-#			self.p(found, split_lists=False)
 
 		elif cmd[0] == '!':
 			h_num = cmd[1:]
 			self.p("HN {}".format(h_num))
-			if 1:
-				h_num = int(h_num)
-				h_len = readline.get_current_history_length()
-				if h_num >= h_len:
-					self.p("{} {}".format(h_num, h_len))
-					raise ValueError
-				cmd_line = readline.get_history_item(h_num)
-				readline.replace_history_item(h_len - 1, cmd_line)
-				self.p("History Cmd: {}".format(cmd_line))
-				self.run_cmd(cmd_line, True)
-#			except ValueError:
-#				self.p("Invalid history number")
-
-
+			h_num = int(h_num)
+			h_len = readline.get_current_history_length()
+			if h_num >= h_len:
+				self.p("{} {}".format(h_num, h_len))
+				raise ValueError
+			cmd_line = readline.get_history_item(h_num)
+			readline.replace_history_item(h_len - 1, cmd_line)
+			self.p("History Cmd: {}".format(cmd_line))
+			self.run_cmd(cmd_line, True)
 
 		else:
-#			h_cmd = re.match('(h|!)(\d+)$', cmd)
-#			if h_cmd:
-#				h_num = int(h_cmd.group(2))
-#				h_len = readline.get_current_history_length()
-#				if h_num >= h_len:
-#					self.p("Invalid history reference")
-#					return
-#				cmd_line = readline.get_history_item(h_num - 1)
-#				readline.replace_history_item(h_len - 1, cmd_line)
-#				self.p("History Cmd: {}".format(cmd_line))
-#				self.run_cmd(cmd_line, True)
-#				return
 			if not valid_cmds.has_key(cmd):
 				self.p("Invalid command (%s)\n" % cmd, True)
 				return
@@ -498,6 +428,7 @@ class Interactive:
 								return
 							account_name = self.account_names[acc_num - 1]
 							params[i] = account_name
+							self.p("Account Name: {}".format(account_name))
 				key = params[0]
 			if cmd == 'signrawtransaction':
 				hash = params[0]
@@ -507,11 +438,7 @@ class Interactive:
 				spk = decoded['vout'][0]['scriptPubKey']['hex']
 				sign = [{ 'txid': txid, 'vout': 0, 'scriptPubKey': spk }]
 				self.p(sign)
-#				return
 				params.append(sign)
-#				js = json.dumps(sign)
-#				params[0] = '"{}"'.format(params[0])
-#				params.append(js)
 			elif cmd == 'createrawtransaction':
 # orig_trans, to_addr, amount, change_addr
 				if len(params) != 4:
@@ -531,24 +458,16 @@ class Interactive:
 				if change < 0:
 					self.p("Invalid amount")
 					return
-#				self.p("{} {} {} {}".format(float(orig_trans_amount), xfer_amount, fee, change))
-#				x1 = '[{"txid":"%s","vout":1}]' % (params[0])
 				x3 = [{'txid': params[0], 'vout': 0}]
 				xfer_to_addr = params[1]
 				change_addr = params[3]
 				trans_out = {xfer_to_addr: xfer_amount}
 				if change > 0:
 					trans_out[change_addr] = change
-#				x2 = json.dumps(trans_out)
-#				params = [x1, x2]
 				params = [x3, trans_out]
 			elif cmd == 'listunspent' and len(params) == 3:
 				params[2] = [params[2]]
-#			elif cmd == 'sendtoaddress':
-#				param[1] = float(param
 			param = ' '.join(['"%s"' % x for x in params])
-#			if show_results:
-#				self.p("api_cmd %s %s" % (cmd, param), True)
 			try:
 				cmd_result = self.api_cmd(cmd, params)
 				self.buffers['LAST'] = cmd_result
@@ -577,146 +496,14 @@ class Interactive:
 				if save_to_buffer:
 					self.buffers[save_to_buffer] = cmd_result
 					self.p("Result was stored to #{}".format(save_to_buffer))
-#				if save_to_cb:
-#					self.buffers['CB'] = cmd_result
-##					self.clipboard = cmd_result
-#					self.p("Result was stored to #CB")
 			except CmdError as e:
 				self.p("ERROR: %s" % (e.error_value), True)
 				self.p("ERROR: cmd='%s'\n param='%s'\n curl_cmd='%s'\n" % (e.cmd, e.param, e.curl_cmd), True)
 				pass
-#		if show_results:
-#			self.add_history(cmd_line)
 
-class screen_wrapper:
-	def __init__(self, screen):
-		self.screen = screen
-		self.y_cursor = 0
-		self.scroll = 0
-	def refresh(self):
-		self.screen.refresh(self.scroll, 0, 0, 0, self.maxy, self.maxx)
-	def addstr(self, a, b=None, c=None, clrtoeol=False):
-		if b == None:
-			if not isinstance(a, (str, unicode)):
-				a = pprint.pformat(a, width=40) + "\n"
-			for l in a.splitlines(True):
-				if len(l) >= self.maxx: # long line
-					self.y_cursor += int(len(l) / self.maxx)
-				if l[-1] == "\n":
-					self.y_cursor += 1
-					y = self.y_cursor - self.scroll
-					if y > self.maxy - 1:
-						self.scroll += y - self.maxy + 1
-				self.screen.addstr(l)
-				self.refresh()
-		else:
-			num_new_lines = c.count("\n")
-			self.y_cursor += num_new_lines
-			self.screen.addstr(a, b, c)
-			if clrtoeol:
-				self.screen.clrtoeol()
-			self.refresh()
 
-def run_curses(window):
-	[maxy, maxx] = window.getmaxyx()
-	maxy -= 1
-	screen = curses.newpad(990, maxx)
-	sw = screen_wrapper(screen)
-	sw.maxy = maxy
-	sw.maxx = maxx
-	screen.keypad(1)
-	inter = Interactive(sw)
-	cmds = []
-	keep_going = True
-	scroll = 0
-	add_cmd = ""
-	while keep_going: # new line
-		tmp_cmd = ""
-		cmd_len = 0
-		cmd_num = len(cmds)
-		sw.addstr(">>> %d CMD >>>> " % cmd_num)
-		[ys, xs] = curses.getsyx()
-
-		while keep_going: # new char
-			input = screen.getch()
-			if input == curses.KEY_LEFT:
-				[y, x] = curses.getsyx()
-				if x > xs:
-					screen.move(y + sw.scroll, x - 1)
-					sw.refresh()
-			elif input == curses.KEY_RIGHT:
-				[y, x] = curses.getsyx()
-				if x < xs + cmd_len:
-					screen.move(y + sw.scroll, x + 1)
-					sw.refresh()
-			elif input == curses.KEY_DOWN:
-				if cmd_num < len(cmds):
-					cmd_num += 1
-					if cmd_num == len(cmds):
-						new_cmd = tmp_cmd
-					else:
-						new_cmd = cmds[cmd_num]
-					cmd_len = len(new_cmd)
-					sw.addstr(ys + sw.scroll, xs, new_cmd, clrtoeol=True)
-			elif input == curses.KEY_UP:
-				if cmd_num > 0:
-					if cmd_num == len(cmds):
-						tmp_cmd = screen.instr(ys + sw.scroll, xs, cmd_len)
-					cmd_num -= 1
-					new_cmd = cmds[cmd_num]
-					cmd_len = len(new_cmd)
-					sw.addstr(ys + sw.scroll, xs, new_cmd, clrtoeol=True)
-			elif input == 127: #curses.KEY_BACKSPACE:
-				if cmd_len > 0:
-					cmd_len -= 1
-					[y, x] = curses.getsyx()
-					screen.delch(y + sw.scroll, x - 1)
-					sw.refresh()
-			elif curses.keyname(input) == '^K':
-				screen.clrtoeol()
-				sw.refresh()
-			elif curses.keyname(input) == '^A':
-				screen.move(ys + sw.scroll, xs)
-				sw.refresh()
-			elif input == ord("\n"):
-				new_cmd = screen.instr(ys + sw.scroll, xs, cmd_len)
-				screen.move(ys + sw.scroll, xs + cmd_len)
-				sw.addstr("\n")
-				new_cmd = new_cmd.strip()
-				if new_cmd == '':
-					break
-				elif new_cmd == 'q':
-					keep_going = False
-					break
-				cmds.append(new_cmd)
-				res = inter.run_cmd(new_cmd, True)
-				break
-			else:
-				cmd_len += 1
-				screen.insch(input)
-				[y, x] = curses.getsyx()
-				screen.move(y + sw.scroll, x + 1)
-				sw.refresh()
-
-def run_interactive():
-	inter = Interactive()
-	while 1:
-		arg = raw_input('Bitcoin >> ').strip()
-		if arg == 'q':
-			exit()
-		elif arg == 'info':
-			inter.printStuff()
-		else:
-			inter.run_cmd(arg, True)
-
-#delims = readline.get_completer_delims()
-#print "X%sX" % delims
-#new_delims = delims.replace('$','')
 new_delims = ""
 readline.set_completer_delims(new_delims)
-#delims = readline.get_completer_delims()
-#print delims
-#exit()
 inter = Interactive()
 def completer(text, state):
 	if text[0] == '#':
@@ -729,13 +516,13 @@ def completer(text, state):
 		return None
 readline.set_completer(completer)
 
-histfile = HISTORY_FILE
+histfile = os.path.join(os.environ["HOME"], HISTORY_FILE)
 try:
-	readline.read_history_file(HISTORY_FILE)
+	readline.read_history_file(histfile)
 except IOError:
 	pass
 import atexit
-atexit.register(readline.write_history_file, HISTORY_FILE)
+atexit.register(readline.write_history_file, histfile)
 del os, histfile
 if 'libedit' in readline.__doc__:
 	readline.parse_and_bind("bind ^I rl_complete")
